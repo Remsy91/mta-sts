@@ -1,31 +1,49 @@
-name: Update MTA-STS ID
+# 📄 .github/workflows/update-mta-sts-id.yml
 
+name: Update MTA-STS DNS ID
+
+# 🔁 Trigger: Nur wenn mta-sts.txt sich ändert
 on:
   push:
     paths:
       - ".well-known/mta-sts.txt"
 
 jobs:
-  update-id:
-    runs-on: ubuntu-latest
-    steps:
-    - name: Generate New ID
-      run: |
-        echo "v=STSv1; id=$(date -u +'%Y%m%dT%H%M%S')" > new_id.txt
+  update-mta-sts-id:
+    name: Update _mta-sts DNS Record
+    runs-on: windows-latest
 
-    - name: Update Cloudflare DNS Record
-      env:
-        CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
-        CF_ZONE_ID: ${{ secrets.CF_ZONE_ID }}
-        CF_RECORD_ID: ${{ secrets.CF_RECORD_ID }}
-      run: |
-        ID=$(cat new_id.txt | cut -d= -f3)
-        curl -X PUT "https://api.cloudflare.com/client/v4/zones/$CF_ZONE_ID/dns_records/$CF_RECORD_ID" \
-          -H "Authorization: Bearer $CF_API_TOKEN" \
-          -H "Content-Type: application/json" \
-          --data '{
-            "type":"TXT",
-            "name":"_mta-sts.remsy.net",
-            "content":"v=STSv1; id='"$ID"'",
-            "ttl":3600
-          }'
+    steps:
+      # 📥 Repository klonen
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      # ⏱️ Erzeuge neuen Zeitstempel für DNS ID
+      - name: Generate timestamp ID
+        id: timestamp
+        run: echo "::set-output name=id::$(Get-Date -Format yyyyMMddTHHmmss)"
+        shell: pwsh
+
+      # 📤 DNS-Record bei Cloudflare updaten
+      - name: Update Cloudflare DNS TXT record
+        env:
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}       # Cloudflare API Token
+          CF_ZONE_ID: ${{ secrets.CF_ZONE_ID }}           # Cloudflare Zone ID
+          CF_RECORD_ID: ${{ secrets.CF_RECORD_ID }}       # DNS Record ID für _mta-sts
+        run: |
+          $Headers = @{ 
+            "Authorization" = "Bearer $env:CF_API_TOKEN" 
+            "Content-Type"  = "application/json" 
+          }
+
+          $NewContent = "v=STSv1; id=${{ steps.timestamp.outputs.id }}"
+
+          $Body = @{ 
+            type = "TXT"
+            name = "_mta-sts.remsy.net"
+            content = $NewContent
+            ttl = 3600 
+          } | ConvertTo-Json -Depth 3
+
+          Invoke-RestMethod -Uri "https://api.cloudflare.com/client/v4/zones/$env:CF_ZONE_ID/dns_records/$env:CF_RECORD_ID" -Method PUT -Headers $Headers -Body $Body
+        shell: pwsh
