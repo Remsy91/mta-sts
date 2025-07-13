@@ -1,0 +1,31 @@
+name: Update MTA-STS ID
+
+on:
+  push:
+    paths:
+      - ".well-known/mta-sts.txt"
+
+jobs:
+  update-id:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Generate New ID
+      run: |
+        echo "v=STSv1; id=$(date -u +'%Y%m%dT%H%M%S')" > new_id.txt
+
+    - name: Update Cloudflare DNS Record
+      env:
+        CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+        CF_ZONE_ID: ${{ secrets.CF_ZONE_ID }}
+        CF_RECORD_ID: ${{ secrets.CF_RECORD_ID }}
+      run: |
+        ID=$(cat new_id.txt | cut -d= -f3)
+        curl -X PUT "https://api.cloudflare.com/client/v4/zones/$CF_ZONE_ID/dns_records/$CF_RECORD_ID" \
+          -H "Authorization: Bearer $CF_API_TOKEN" \
+          -H "Content-Type: application/json" \
+          --data '{
+            "type":"TXT",
+            "name":"_mta-sts.remsy.net",
+            "content":"v=STSv1; id='"$ID"'",
+            "ttl":3600
+          }'
